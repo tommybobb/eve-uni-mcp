@@ -25,7 +25,7 @@ Gives Claude up-to-date EVE Online information from the community-maintained EVE
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/eve-wiki-mcp.git
+git clone https://github.com/tommybobb/eve-wiki-mcp.git
 cd eve-wiki-mcp
 
 # Run one-click deployment
@@ -43,14 +43,14 @@ The script will automatically:
 
 ```bash
 # Clone for configuration files
-git clone https://github.com/YOUR_USERNAME/eve-wiki-mcp.git
+git clone https://github.com/tommybobb/eve-wiki-mcp.git
 cd eve-wiki-mcp
 
 # Copy environment template
 cp .env.example .env
 
 # Pull pre-built multi-arch image from GHCR
-docker pull ghcr.io/YOUR_USERNAME/eve-wiki-mcp:latest
+docker pull ghcr.io/tommybobb/eve-wiki-mcp:latest
 
 # Start with pre-built image
 docker-compose -f docker-compose.ghcr.yml up -d
@@ -62,7 +62,7 @@ curl http://localhost:8000/health
 ### Manual Docker Compose
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/eve-wiki-mcp.git
+git clone https://github.com/tommybobb/eve-wiki-mcp.git
 cd eve-wiki-mcp
 cp .env.example .env
 docker-compose up -d
@@ -180,7 +180,7 @@ make rebuild
 ### Using Pre-built Images
 
 ```bash
-docker pull ghcr.io/YOUR_USERNAME/eve-wiki-mcp:latest
+docker pull ghcr.io/tommybobb/eve-wiki-mcp:latest
 docker-compose -f docker-compose.ghcr.yml restart
 ```
 
@@ -195,12 +195,12 @@ This project uses **GitHub Actions** for automated builds:
 
 **Pre-built images available at:**
 ```
-ghcr.io/YOUR_USERNAME/eve-wiki-mcp:latest
+ghcr.io/tommybobb/eve-wiki-mcp:latest
 ```
 
 ### Build Status
 
-![Build and Push Docker Images](https://github.com/YOUR_USERNAME/eve-wiki-mcp/workflows/Build%20and%20Push%20Docker%20Images/badge.svg)
+![Build and Push Docker Images](https://github.com/tommybobb/eve-wiki-mcp/workflows/Build%20and%20Push%20Docker%20Images/badge.svg)
 
 Multi-arch images are automatically built for:
 - `linux/amd64` - Intel/AMD systems
@@ -303,12 +303,51 @@ The wiki can be slow. If you see timeouts:
 - Increase timeout in [eve_wiki_mcp_server_docker.py](eve_wiki_mcp_server_docker.py) (change `TIMEOUT = 30.0` to `60.0`)
 - Rebuild: `make rebuild`
 
-## Security Notes
+## Security
+
+This server includes multiple security features for safe deployment:
+
+### Built-in Security Features
+
+- ✅ **Input Validation** - All user inputs validated for type, length, and content
+- ✅ **Rate Limiting** - Configurable per-client rate limiting (default: 60 req/min)
+- ✅ **Optional Authentication** - Bearer token authentication support
+- ✅ **Secure Error Handling** - Sanitized errors, detailed logging server-side only
+- ✅ **URL Encoding** - Proper encoding prevents injection attacks
+- ✅ **Non-root Container** - Runs as unprivileged user (UID 1000)
+- ✅ **Pinned Dependencies** - Exact versions for reproducible, secure builds
+
+### Security Configuration
+
+**Enable Authentication** (recommended for external access):
+```bash
+# In .env file
+MCP_AUTH_TOKEN=your-secure-random-token-here
+
+# Generate a secure token:
+openssl rand -hex 32
+```
+
+**Configure Rate Limiting**:
+```bash
+RATE_LIMIT_REQUESTS=60  # requests per window
+RATE_LIMIT_WINDOW=60    # seconds
+```
+
+**Enable CORS** (for web clients):
+```bash
+CORS_ORIGINS=https://example.com,https://app.example.com
+```
+
+### Deployment Recommendations
 
 - **Local network only** by default (0.0.0.0 binding allows LAN access)
-- **No authentication** - add via reverse proxy if exposing externally
+- **Enable authentication** if exposing externally
+- **Use reverse proxy** (Nginx/Traefik) for TLS/HTTPS
 - **Firewall recommended** to limit access to trusted networks
 - **VPN preferred** for external access instead of direct internet exposure
+
+See [SECURITY.md](SECURITY.md) for complete security documentation and best practices
 
 ## Project Structure
 
@@ -326,6 +365,7 @@ eve-wiki-mcp/
 ├── README.md                       # This file
 ├── README_DOCKER.md                # Detailed Docker documentation
 ├── DOCKER_DEPLOYMENT.md            # Comprehensive deployment guide
+├── SECURITY.md                     # Security documentation and best practices
 ├── LICENSE                         # MIT license
 ├── CONTRIBUTING.md                 # Contribution guidelines
 ├── CHANGELOG.md                    # Version history
@@ -337,6 +377,7 @@ eve-wiki-mcp/
 ## Documentation
 
 - **[README.md](README.md)** - This file, quick start and overview
+- **[SECURITY.md](SECURITY.md)** - Security features and best practices
 - **[DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md)** - Comprehensive deployment guide
 - **[README_DOCKER.md](README_DOCKER.md)** - Detailed Docker documentation
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - How to contribute
@@ -415,8 +456,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## Support
 
-- **Issues:** Report bugs and request features on [GitHub Issues](https://github.com/YOUR_USERNAME/eve-wiki-mcp/issues)
-- **Discussions:** Join conversations on [GitHub Discussions](https://github.com/YOUR_USERNAME/eve-wiki-mcp/discussions)
+- **Issues:** Report bugs and request features on [GitHub Issues](https://github.com/tommybobb/eve-wiki-mcp/issues)
+- **Discussions:** Join conversations on [GitHub Discussions](https://github.com/tommybobb/eve-wiki-mcp/discussions)
 - **EVE University:** Visit [wiki.eveuniversity.org](https://wiki.eveuniversity.org) for EVE Online content
 
 ---

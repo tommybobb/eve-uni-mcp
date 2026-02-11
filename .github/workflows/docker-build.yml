@@ -1,4 +1,4 @@
-name: Build and Push Docker Images
+name: Build and Deploy
 
 on:
   push:
@@ -12,7 +12,8 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-push:
+  # Job 1: Build the Docker image on GitHub's cloud runners
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -52,6 +53,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -65,3 +67,38 @@ jobs:
       - name: Image digest
         if: github.event_name != 'pull_request'
         run: echo "Image pushed with digest ${{ steps.build.outputs.digest }}"
+
+  # Job 2: Deploy to the Raspberry Pi using your self-hosted runner
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: [self-hosted, linux, ARM64]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Pull latest image
+        run: docker pull ghcr.io/${{ github.repository }}:latest
+
+      - name: Stop existing container
+        run: docker compose -f docker-compose.ghcr.yml down || true
+
+      - name: Start updated container
+        run: docker compose -f docker-compose.ghcr.yml up -d
+
+      - name: Wait for health check
+        run: |
+          echo "Waiting for service to start..."
+          sleep 10
+          for i in {1..5}; do
+            if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+              echo "✅ Service is healthy!"
+              exit 0
+            fi
+            echo "Attempt $i/5 - waiting..."
+            sleep 5
+          done
+          echo "❌ Health check failed"
+          docker compose -f docker-compose.ghcr.yml logs
+          exit 1

@@ -30,12 +30,38 @@ fi
 
 # Check Docker
 if ! command -v docker &> /dev/null; then
-    echo "📦 Docker not found. Installing Docker..."
-    curl -fsSL https://get.docker.com | sh
-    sudo usermod -aG docker $USER
-    echo "✅ Docker installed! You may need to log out and back in."
-    echo "Then run this script again."
-    exit 0
+    echo "📦 Docker not found."
+    echo ""
+    echo "⚠️  SECURITY NOTICE:"
+    echo "This script can install Docker automatically, but this requires running"
+    echo "a remote script with elevated privileges."
+    echo ""
+    echo "Options:"
+    echo "  1. Install Docker automatically (runs: curl -fsSL https://get.docker.com | sh)"
+    echo "  2. Install Docker manually (recommended)"
+    echo ""
+    read -p "Choose option (1 or 2): " choice
+    
+    if [[ "$choice" == "1" ]]; then
+        echo "Installing Docker automatically..."
+        curl -fsSL https://get.docker.com | sh
+        sudo usermod -aG docker $USER
+        echo "✅ Docker installed! You may need to log out and back in."
+        echo "Then run this script again."
+        exit 0
+    else
+        echo ""
+        echo "Please install Docker manually:"
+        echo "  Visit: https://docs.docker.com/engine/install/"
+        echo ""
+        echo "For Raspberry Pi OS:"
+        echo "  curl -fsSL https://get.docker.com -o get-docker.sh"
+        echo "  cat get-docker.sh  # Review the script first!"
+        echo "  sudo sh get-docker.sh"
+        echo "  sudo usermod -aG docker \$USER"
+        echo ""
+        exit 0
+    fi
 fi
 
 # Check Docker Compose
@@ -62,7 +88,7 @@ fi
 # Build or pull image
 if [ "$USE_GHCR" = true ]; then
     echo "📥 Pulling pre-built image from GitHub Container Registry..."
-    docker pull ghcr.io/YOUR_USERNAME/eve-wiki-mcp:latest
+    docker pull ghcr.io/tommybobb/eve-wiki-mcp:latest
 
     echo
     echo "🚀 Starting service with pre-built image..."
@@ -116,7 +142,7 @@ echo "  make restart              # Restart"
 echo
 echo "To update:"
 if [ "$USE_GHCR" = true ]; then
-    echo "  docker pull ghcr.io/YOUR_USERNAME/eve-wiki-mcp:latest"
+    echo "  docker pull ghcr.io/tommybobb/eve-wiki-mcp:latest"
     echo "  docker-compose -f docker-compose.ghcr.yml restart"
 else
     echo "  git pull origin main"

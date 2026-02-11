@@ -3,8 +3,7 @@ version: '3.8'
 services:
   eve-wiki-mcp:
     # Use pre-built image from GitHub Container Registry
-    # Replace YOUR_USERNAME with your GitHub username
-    image: ghcr.io/YOUR_USERNAME/eve-wiki-mcp:latest
+    image: ghcr.io/tommybobb/eve-wiki-mcp:latest
     container_name: eve-wiki-mcp
     restart: unless-stopped
 
@@ -14,6 +13,11 @@ services:
       # Server configuration
       - MCP_HOST=0.0.0.0
       - MCP_PORT=8000
+      # Security configuration (optional)
+      - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN:-}
+      - RATE_LIMIT_REQUESTS=${RATE_LIMIT_REQUESTS:-60}
+      - RATE_LIMIT_WINDOW=${RATE_LIMIT_WINDOW:-60}
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
 
     ports:
       - "8000:8000"

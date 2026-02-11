@@ -14,7 +14,7 @@ Deploy the EVE University Wiki MCP server as a container on your Raspberry Pi, h
 
 ```bash
 # Clone from GitHub
-git clone https://github.com/YOUR_USERNAME/eve-wiki-mcp.git
+git clone https://github.com/tommybobb/eve-wiki-mcp.git
 cd eve-wiki-mcp
 ```
 
@@ -24,7 +24,7 @@ cd eve-wiki-mcp
 
 ```bash
 # Pull pre-built multi-arch image from GHCR
-docker pull ghcr.io/YOUR_USERNAME/eve-wiki-mcp:latest
+docker pull ghcr.io/tommybobb/eve-wiki-mcp:latest
 
 # Copy environment template
 cp .env.example .env
@@ -159,10 +159,10 @@ Pre-built multi-architecture images are automatically built via GitHub Actions a
 
 ```bash
 # Pull the latest image
-docker pull ghcr.io/YOUR_USERNAME/eve-wiki-mcp:latest
+docker pull ghcr.io/tommybobb/eve-wiki-mcp:latest
 
 # Or pull a specific version
-docker pull ghcr.io/YOUR_USERNAME/eve-wiki-mcp:v1.0.0
+docker pull ghcr.io/tommybobb/eve-wiki-mcp:v1.0.0
 ```
 
 **Available image tags:**
@@ -223,10 +223,10 @@ This project includes automated CI/CD via GitHub Actions:
 **Accessing Images:**
 ```bash
 # Latest from main branch
-docker pull ghcr.io/YOUR_USERNAME/eve-wiki-mcp:latest
+docker pull ghcr.io/tommybobb/eve-wiki-mcp:latest
 
 # Specific version
-docker pull ghcr.io/YOUR_USERNAME/eve-wiki-mcp:v1.0.0
+docker pull ghcr.io/tommybobb/eve-wiki-mcp:v1.0.0
 ```
 
 **Note:** GHCR package must be set to "public" in GitHub settings for unauthenticated pulls.
@@ -258,7 +258,7 @@ docker-compose ps
 
 ```bash
 # Pull latest image
-docker pull ghcr.io/YOUR_USERNAME/eve-wiki-mcp:latest
+docker pull ghcr.io/tommybobb/eve-wiki-mcp:latest
 
 # Restart with new image
 docker-compose -f docker-compose.ghcr.yml restart

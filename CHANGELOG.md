@@ -7,7 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-02-11
+
+### Security
+- **CRITICAL**: Added comprehensive input validation for all user inputs
+  - Type checking, length limits, and null byte protection
+  - Maximum length constraints: queries (500), titles (500), categories (200)
+- **CRITICAL**: Implemented rate limiting to prevent DoS attacks
+  - Configurable per-client limits (default: 60 requests/minute)
+  - IP-based tracking with automatic cleanup
+- **HIGH**: Added optional bearer token authentication
+  - Configurable via `MCP_AUTH_TOKEN` environment variable
+  - Recommended for external deployments
+- **HIGH**: Improved error handling and logging
+  - Detailed errors logged server-side only
+  - Sanitized error messages returned to clients
+  - No stack traces or internal paths exposed
+- **MEDIUM**: Added proper URL encoding for all generated URLs
+  - Prevents URL injection attacks
+  - Uses `urllib.parse.quote()` for safe encoding
+- **MEDIUM**: Pinned all dependencies to exact versions
+  - Prevents supply chain attacks from compromised updates
+  - Ensures reproducible builds
+- **MEDIUM**: Added CORS configuration support
+  - Restrictive by default
+  - Configurable via `CORS_ORIGINS` environment variable
+- **LOW**: Enhanced deploy-pi.sh with security warning
+  - User confirmation required before running remote scripts
+  - Manual installation instructions provided
+
 ### Added
+- `SECURITY.md` - Comprehensive security documentation
+  - Security features overview
+  - Configuration guide
+  - Deployment best practices
+  - Vulnerability reporting process
+- Structured logging with Python's logging module
+- Health endpoint now returns version information
+- Security configuration in `.env.example`
 - GitHub Actions CI/CD for automated multi-architecture Docker builds
 - Automated publishing to GitHub Container Registry (GHCR)
 - Git-based deployment workflow with comprehensive documentation
@@ -21,6 +58,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `.gitignore` for proper git repository management
 
 ### Changed
+- Updated `eve_wiki_mcp_server_docker.py` with security hardening
+- Updated `requirements.txt` with pinned versions and comments
+- Updated `.env.example` with security configuration options
+- Updated `docker-compose.yml` with security environment variables
+- Updated `docker-compose.ghcr.yml` with security environment variables
+- Enhanced README.md with security section
 - Reorganized documentation with new primary `README.md`
 - Enhanced deployment documentation with git workflow information
 - Updated `DOCKER_DEPLOYMENT.md` with GitHub and GHCR instructions
@@ -86,5 +129,6 @@ Versions follow Semantic Versioning (MAJOR.MINOR.PATCH):
 
 ---
 
-[Unreleased]: https://github.com/YOUR_USERNAME/eve-wiki-mcp/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/YOUR_USERNAME/eve-wiki-mcp/releases/tag/v1.0.0
+[Unreleased]: https://github.com/tommybobb/eve-wiki-mcp/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/tommybobb/eve-wiki-mcp/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/tommybobb/eve-wiki-mcp/releases/tag/v1.0.0

@@ -1,6 +1,20 @@
-mcp>=1.0.0
-httpx>=0.27.0
-html2text>=2024.2.26
-uvicorn>=0.30.0
-starlette>=0.37.0
-sse-starlette>=2.1.0
+# MCP Server dependencies - pinned for security and reproducibility
+# Last updated: 2026-02-11
+
+# Core MCP framework
+mcp==1.1.0
+
+# HTTP client for wiki API calls
+httpx==0.27.2
+
+# HTML to Markdown conversion
+html2text==2024.2.26
+
+# ASGI server
+uvicorn==0.30.6
+
+# Web framework for SSE transport
+starlette==0.38.5
+
+# Server-Sent Events support
+sse-starlette==2.1.3

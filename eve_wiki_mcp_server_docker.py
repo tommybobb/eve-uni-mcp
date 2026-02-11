@@ -14,11 +14,33 @@ import httpx
 import html2text
 from typing import Any
 import asyncio
+import logging
+from urllib.parse import quote
+import time
+from collections import defaultdict
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 app = Server("eve-university-wiki")
 
 WIKI_API = "https://wiki.eveuniversity.org/api.php"
 TIMEOUT = 30.0
+
+# Security configuration
+MAX_QUERY_LENGTH = 500
+MAX_TITLE_LENGTH = 500
+MAX_CATEGORY_LENGTH = 200
+AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN", "")
+
+# Rate limiting configuration
+RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "60"))  # requests per window
+RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "60"))  # seconds
+rate_limit_store = defaultdict(list)
 
 # Initialize html2text converter
 h = html2text.HTML2Text()
@@ -26,6 +48,43 @@ h.ignore_links = False
 h.ignore_images = False
 h.ignore_emphasis = False
 h.body_width = 0  # Don't wrap text
+
+
+def validate_string_input(value: Any, max_length: int, field_name: str) -> tuple[bool, str]:
+    """Validate string input for security"""
+    if not isinstance(value, str):
+        return False, f"{field_name} must be a string"
+    
+    if len(value) == 0:
+        return False, f"{field_name} cannot be empty"
+    
+    if len(value) > max_length:
+        return False, f"{field_name} exceeds maximum length of {max_length}"
+    
+    # Check for null bytes
+    if '\x00' in value:
+        return False, f"{field_name} contains invalid characters"
+    
+    return True, ""
+
+
+def check_rate_limit(client_id: str) -> bool:
+    """Simple in-memory rate limiting"""
+    now = time.time()
+    
+    # Clean old entries
+    rate_limit_store[client_id] = [
+        timestamp for timestamp in rate_limit_store[client_id]
+        if now - timestamp < RATE_LIMIT_WINDOW
+    ]
+    
+    # Check limit
+    if len(rate_limit_store[client_id]) >= RATE_LIMIT_REQUESTS:
+        return False
+    
+    # Add current request
+    rate_limit_store[client_id].append(now)
+    return True
 
 
 async def fetch_wiki(params: dict) -> dict:
@@ -36,9 +95,14 @@ async def fetch_wiki(params: dict) -> dict:
             response.raise_for_status()
             return response.json()
         except httpx.TimeoutException:
+            logger.warning("Wiki API timeout for params: %s", params)
             return {"error": {"info": "Request timed out. Wiki may be slow."}}
+        except httpx.HTTPStatusError as e:
+            logger.error("Wiki API HTTP error: %s", e)
+            return {"error": {"info": "Wiki API returned an error. Please try again."}}
         except Exception as e:
-            return {"error": {"info": f"Request failed: {str(e)}"}}
+            logger.exception("Wiki API request failed")
+            return {"error": {"info": "Request failed. Please try again later."}}
 
 
 @app.list_tools()
@@ -144,7 +208,13 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     """Handle tool calls"""
     
     if name == "search_eve_wiki":
-        query = arguments["query"]
+        query = arguments.get("query", "")
+        
+        # Validate input
+        valid, error_msg = validate_string_input(query, MAX_QUERY_LENGTH, "query")
+        if not valid:
+            return [TextContent(type="text", text=f"❌ {error_msg}")]
+        
         limit = min(arguments.get("limit", 10), 50)
         
         params = {
@@ -187,7 +257,12 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         )]
     
     elif name == "get_eve_wiki_page":
-        title = arguments["title"]
+        title = arguments.get("title", "")
+        
+        # Validate input
+        valid, error_msg = validate_string_input(title, MAX_TITLE_LENGTH, "title")
+        if not valid:
+            return [TextContent(type="text", text=f"❌ {error_msg}")]
         
         params = {
             "action": "parse",
@@ -216,9 +291,10 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             # Clean up some MediaWiki artifacts
             markdown_content = markdown_content.replace("[ edit ]", "")
             
-            # Build response
+            # Build response with properly encoded URL
+            url_safe_title = quote(title.replace(' ', '_'), safe='')
             result = f"# {display_title}\n\n"
-            result += f"🔗 https://wiki.eveuniversity.org/wiki/{title.replace(' ', '_')}\n\n"
+            result += f"🔗 https://wiki.eveuniversity.org/wiki/{url_safe_title}\n\n"
             
             if categories:
                 result += f"**Categories:** {', '.join(categories[:5])}\n\n"
@@ -228,14 +304,26 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             
             return [TextContent(type="text", text=result)]
             
-        except Exception as e:
+        except KeyError as e:
+            logger.error("Missing expected key in wiki response: %s", e)
             return [TextContent(
                 type="text",
-                text=f"❌ Error parsing page content: {str(e)}"
+                text="❌ Error parsing page content. The page format may be unexpected."
+            )]
+        except Exception as e:
+            logger.exception("Error parsing wiki page: %s", title)
+            return [TextContent(
+                type="text",
+                text="❌ Error parsing page content. Please try again."
             )]
     
     elif name == "get_eve_wiki_summary":
-        title = arguments["title"]
+        title = arguments.get("title", "")
+        
+        # Validate input
+        valid, error_msg = validate_string_input(title, MAX_TITLE_LENGTH, "title")
+        if not valid:
+            return [TextContent(type="text", text=f"❌ {error_msg}")]
         
         params = {
             "action": "query",
@@ -267,20 +355,29 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             extract = page.get("extract", "No summary available.")
             page_title = page.get("title", title)
             
+            # Build response with properly encoded URL
+            url_safe_title = quote(title.replace(' ', '_'), safe='')
             result = f"# {page_title}\n\n"
-            result += f"🔗 https://wiki.eveuniversity.org/wiki/{title.replace(' ', '_')}\n\n"
+            result += f"🔗 https://wiki.eveuniversity.org/wiki/{url_safe_title}\n\n"
             result += extract
             
             return [TextContent(type="text", text=result)]
             
         except Exception as e:
+            logger.exception("Error getting summary for: %s", title)
             return [TextContent(
                 type="text",
-                text=f"❌ Error getting summary: {str(e)}"
+                text="❌ Error getting summary. Please try again."
             )]
     
     elif name == "browse_eve_wiki_category":
-        category = arguments["category"]
+        category = arguments.get("category", "")
+        
+        # Validate input
+        valid, error_msg = validate_string_input(category, MAX_CATEGORY_LENGTH, "category")
+        if not valid:
+            return [TextContent(type="text", text=f"❌ {error_msg}")]
+        
         limit = min(arguments.get("limit", 50), 500)
         
         params = {
@@ -318,13 +415,20 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             return [TextContent(type="text", text=result)]
             
         except Exception as e:
+            logger.exception("Error browsing category: %s", category)
             return [TextContent(
                 type="text",
-                text=f"❌ Error browsing category: {str(e)}"
+                text="❌ Error browsing category. Please try again."
             )]
     
     elif name == "get_related_pages":
-        title = arguments["title"]
+        title = arguments.get("title", "")
+        
+        # Validate input
+        valid, error_msg = validate_string_input(title, MAX_TITLE_LENGTH, "title")
+        if not valid:
+            return [TextContent(type="text", text=f"❌ {error_msg}")]
+        
         limit = min(arguments.get("limit", 20), 500)
         
         params = {
@@ -362,9 +466,10 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             return [TextContent(type="text", text=result)]
             
         except Exception as e:
+            logger.exception("Error finding related pages for: %s", title)
             return [TextContent(
                 type="text",
-                text=f"❌ Error finding related pages: {str(e)}"
+                text="❌ Error finding related pages. Please try again."
             )]
     
     return [TextContent(
@@ -392,14 +497,60 @@ async def run_sse():
     from starlette.routing import Route
     from starlette.responses import JSONResponse
     from starlette.requests import Request
+    from starlette.middleware import Middleware
+    from starlette.middleware.cors import CORSMiddleware
     import uvicorn
+
+    # CORS configuration - restrictive by default
+    cors_origins = os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else []
+    
+    # Authentication middleware
+    async def auth_middleware(request: Request, call_next):
+        """Optional token-based authentication"""
+        if AUTH_TOKEN:
+            # Skip auth for health endpoint
+            if request.url.path == "/health":
+                return await call_next(request)
+            
+            auth_header = request.headers.get("Authorization", "")
+            token = auth_header.replace("Bearer ", "").strip()
+            
+            if token != AUTH_TOKEN:
+                logger.warning("Unauthorized access attempt from %s", request.client.host if request.client else "unknown")
+                return JSONResponse(
+                    {"error": "Unauthorized"},
+                    status_code=401
+                )
+        
+        return await call_next(request)
+    
+    # Rate limiting middleware
+    async def rate_limit_middleware(request: Request, call_next):
+        """Simple rate limiting based on client IP"""
+        # Skip rate limiting for health endpoint
+        if request.url.path == "/health":
+            return await call_next(request)
+        
+        client_id = request.client.host if request.client else "unknown"
+        
+        if not check_rate_limit(client_id):
+            logger.warning("Rate limit exceeded for client: %s", client_id)
+            return JSONResponse(
+                {"error": "Rate limit exceeded. Please try again later."},
+                status_code=429
+            )
+        
+        return await call_next(request)
 
     # Health check endpoint
     async def health(request):
-        return JSONResponse({"status": "healthy", "service": "eve-university-wiki-mcp"})
+        return JSONResponse({
+            "status": "healthy",
+            "service": "eve-university-wiki-mcp",
+            "version": "1.1.0"
+        })
 
     # Create SSE endpoint handler
-    # The path argument tells the transport where clients should POST messages
     sse = SseServerTransport("/messages")
 
     async def handle_sse(request: Request):
@@ -417,21 +568,47 @@ async def run_sse():
     async def handle_messages(request: Request):
         return await sse.handle_post_message(request.scope, request.receive, request._send)
 
+    # Build middleware stack
+    middleware = []
+    
+    if cors_origins:
+        middleware.append(
+            Middleware(
+                CORSMiddleware,
+                allow_origins=cors_origins,
+                allow_credentials=True,
+                allow_methods=["GET", "POST"],
+                allow_headers=["*"],
+            )
+        )
+
     starlette_app = Starlette(
         routes=[
             Route("/sse", endpoint=handle_sse),
             Route("/messages", endpoint=handle_messages, methods=["POST"]),
             Route("/health", endpoint=health, methods=["GET"]),
-        ]
+        ],
+        middleware=middleware
     )
+    
+    # Add custom middleware
+    starlette_app.middleware("http")(rate_limit_middleware)
+    starlette_app.middleware("http")(auth_middleware)
 
     # Get configuration from environment
     host = os.getenv("MCP_HOST", "0.0.0.0")
     port = int(os.getenv("MCP_PORT", "8000"))
 
-    print(f"🚀 Starting EVE University Wiki MCP Server on {host}:{port}")
-    print(f"📡 SSE endpoint: http://{host}:{port}/sse")
-    print(f"❤️  Health check: http://{host}:{port}/health")
+    logger.info("🚀 Starting EVE University Wiki MCP Server on %s:%s", host, port)
+    logger.info("📡 SSE endpoint: http://%s:%s/sse", host, port)
+    logger.info("❤️  Health check: http://%s:%s/health", host, port)
+    
+    if AUTH_TOKEN:
+        logger.info("🔒 Authentication enabled")
+    else:
+        logger.warning("⚠️  Authentication disabled - server is open to all clients")
+    
+    logger.info("⏱️  Rate limit: %d requests per %d seconds", RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW)
 
     config = uvicorn.Config(
         starlette_app,

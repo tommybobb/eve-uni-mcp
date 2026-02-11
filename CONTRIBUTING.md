@@ -8,7 +8,7 @@ Thank you for considering contributing to this project! This MCP server helps br
 
 If you find a bug or have a feature request:
 
-1. Check the [GitHub Issues](https://github.com/YOUR_USERNAME/eve-wiki-mcp/issues) to see if it's already reported
+1. Check the [GitHub Issues](https://github.com/tommybobb/eve-wiki-mcp/issues) to see if it's already reported
 2. If not, create a new issue with:
    - Clear, descriptive title
    - Detailed description of the problem or feature
@@ -30,7 +30,7 @@ If you find a bug or have a feature request:
 
 1. **Fork and clone the repository:**
    ```bash
-   git clone https://github.com/YOUR_USERNAME/eve-wiki-mcp.git
+   git clone https://github.com/tommybobb/eve-wiki-mcp.git
    cd eve-wiki-mcp
    ```
 

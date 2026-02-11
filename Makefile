@@ -88,7 +88,7 @@ multi-arch: ## Build for multiple architectures
 
 pull-ghcr: ## Pull pre-built image from GitHub Container Registry
 	@echo "📥 Pulling pre-built image from GHCR..."
-	docker pull ghcr.io/YOUR_USERNAME/eve-wiki-mcp:latest
+	docker pull ghcr.io/tommybobb/eve-wiki-mcp:latest
 	@echo "✅ Image pulled successfully!"
 
 deploy-ghcr: pull-ghcr ## Deploy using pre-built GHCR image
