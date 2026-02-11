@@ -1,9 +1,9 @@
-version: '3.8'
+
 
 services:
   eve-wiki-mcp:
     # Use pre-built image from GitHub Container Registry
-    image: ghcr.io/tommybobb/eve-wiki-mcp:latest
+    image: ghcr.io/tommybobb/eve-uni-mcp:latest
     container_name: eve-wiki-mcp
     restart: unless-stopped
 

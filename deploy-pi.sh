@@ -88,7 +88,7 @@ fi
 # Build or pull image
 if [ "$USE_GHCR" = true ]; then
     echo "📥 Pulling pre-built image from GitHub Container Registry..."
-    docker pull ghcr.io/tommybobb/eve-wiki-mcp:latest
+    docker pull ghcr.io/tommybobb/eve-uni-mcp:latest
 
     echo
     echo "🚀 Starting service with pre-built image..."
@@ -142,7 +142,7 @@ echo "  make restart              # Restart"
 echo
 echo "To update:"
 if [ "$USE_GHCR" = true ]; then
-    echo "  docker pull ghcr.io/tommybobb/eve-wiki-mcp:latest"
+    echo "  docker pull ghcr.io/tommybobb/eve-uni-mcp:latest"
     echo "  docker-compose -f docker-compose.ghcr.yml restart"
 else
     echo "  git pull origin main"
