@@ -554,16 +554,11 @@ async def run_sse():
     sse = SseServerTransport("/messages")
 
     async def handle_sse(request: Request):
-        async with sse.connect_sse(
+        await sse.connect_sse(
             request.scope,
             request.receive,
             request._send,
-        ) as streams:
-            await app.run(
-                streams[0],
-                streams[1],
-                app.create_initialization_options()
-            )
+        )
 
     async def handle_messages(request: Request):
         return await sse.handle_post_message(request.scope, request.receive, request._send)
