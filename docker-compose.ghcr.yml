@@ -1,5 +1,3 @@
-
-
 services:
   eve-wiki-mcp:
     # Use pre-built image from GitHub Container Registry
