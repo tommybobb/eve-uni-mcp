@@ -494,7 +494,7 @@ async def run_sse():
     """Run with SSE transport (for containerized/remote use)"""
     from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
-    from starlette.routing import Route
+    from starlette.routing import Route, Mount
     from starlette.responses import JSONResponse
     from starlette.requests import Request
     from starlette.middleware import Middleware
@@ -551,22 +551,19 @@ async def run_sse():
         })
 
     # Create SSE endpoint handler
-    sse = SseServerTransport("/messages")
+    sse = SseServerTransport("/messages/")
 
     async def handle_sse(request: Request):
         async with sse.connect_sse(
             request.scope,
             request.receive,
             request._send,
-        ) as streams:
+        ) as (read_stream, write_stream):
             await app.run(
-                streams[0],
-                streams[1],
+                read_stream,
+                write_stream,
                 app.create_initialization_options()
             )
-
-    async def handle_messages(request: Request):
-        return await sse.handle_post_message(request.scope, request.receive, request._send)
 
     # Build middleware stack
     middleware = []
@@ -585,7 +582,7 @@ async def run_sse():
     starlette_app = Starlette(
         routes=[
             Route("/sse", endpoint=handle_sse),
-            Route("/messages", endpoint=handle_messages, methods=["POST"]),
+            Mount("/messages/", app=sse.handle_post_message),
             Route("/health", endpoint=health, methods=["GET"]),
         ],
         middleware=middleware
