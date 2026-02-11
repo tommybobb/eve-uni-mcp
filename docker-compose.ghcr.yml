@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  eve-wiki-mcp:
+    # Use pre-built image from GitHub Container Registry
+    # Replace YOUR_USERNAME with your GitHub username
+    image: ghcr.io/YOUR_USERNAME/eve-wiki-mcp:latest
+    container_name: eve-wiki-mcp
+    restart: unless-stopped
+
+    environment:
+      # Transport mode: sse for containerized, stdio for local
+      - MCP_TRANSPORT=sse
+      # Server configuration
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8000
+
+    ports:
+      - "8000:8000"
+
+    # Resource limits (good for Raspberry Pi)
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health', timeout=5.0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Network
+    networks:
+      - eve-mcp-network
+
+networks:
+  eve-mcp-network:
+    driver: bridge
