@@ -3,9 +3,12 @@ FROM python:3.11-slim
 # Install dependencies
 WORKDIR /app
 
+# Upgrade pip first
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
 # Copy requirements first for better caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt -vv
 
 # Copy application files
 COPY eve_wiki_mcp_server_docker.py eve_wiki_mcp_server.py
