@@ -2,10 +2,10 @@ name: Build and Deploy
 
 on:
   push:
-    branches: [ main ]
+    branches: [ master ]
     tags: [ 'v*.*.*' ]
   pull_request:
-    branches: [ main ]
+    branches: [ master ]
 
 env:
   REGISTRY: ghcr.io
@@ -71,7 +71,7 @@ jobs:
   # Job 2: Deploy to the Raspberry Pi using your self-hosted runner
   deploy:
     needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
     runs-on: [self-hosted, linux, ARM64]
 
     steps:
