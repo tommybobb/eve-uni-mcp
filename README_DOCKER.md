@@ -7,7 +7,7 @@ Containerized MCP server providing Claude with up-to-date EVE Online information
 
 ## 🎯 What This Does
 
-Gives Claude real-time access to EVE Online game information without relying on outdated training data. When you ask about ships, mechanics, or guides, Claude can fetch current information from the community-maintained EVE University Wiki.
+Gives Claude real-time access to EVE Online game information without relying on outdated training data. When you ask about ships, mechanics, or guides, Claude  can fetch current information from the community-maintained EVE University Wiki.
 
 ## 🚀 Super Quick Start
 
@@ -19,7 +19,6 @@ chmod +x deploy-pi.sh
 
 ### Any Docker Host
 ```bash
-docker-compose up -d
 curl http://localhost:8000/health
 ```
 
