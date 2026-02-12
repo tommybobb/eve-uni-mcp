@@ -1,0 +1,133 @@
+import asyncio
+
+import eve_wiki_mcp_server_docker as server
+
+
+def _build_fake_fetch(timeout_mode: bool = False):
+    async def fake_fetch(params: dict) -> dict:
+        action = params.get("action")
+
+        if action == "opensearch":
+            query = params.get("search", "")
+            if timeout_mode and "highsec" in query.lower():
+                return {"error": {"info": "Request timed out. Wiki may be slow."}}
+            titles = [
+                "Mining",
+                "Venture",
+                "Career Agents",
+                "Highsec",
+                "Ore",
+                "Mining Frigate",
+            ]
+            descriptions = [
+                "Mining overview and basics",
+                "Starter mining frigate",
+                "New player onboarding agents",
+                "High-sec safety basics",
+                "Ore types and mechanics",
+                "Frigate fitting basics for miners",
+            ]
+            urls = [server.build_wiki_url(title) for title in titles]
+            return [query, titles, descriptions, urls]
+
+        if action == "query" and params.get("prop") == "extracts":
+            title = params.get("titles", "Mining")
+            return {
+                "query": {
+                    "pages": {
+                        "1": {
+                            "pageid": 1,
+                            "title": title,
+                            "extract": f"{title} summary for beginner mining pilots.",
+                        }
+                    }
+                }
+            }
+
+        if action == "parse":
+            title = params.get("page", "Mining")
+            return {
+                "parse": {
+                    "text": {
+                        "*": "<p>Detailed mining page content including fitting and safety notes.</p>"
+                    },
+                    "displaytitle": title,
+                    "categories": [],
+                }
+            }
+
+        return {}
+
+    return fake_fetch
+
+
+def _call_plan_tool(arguments: dict | None = None) -> str:
+    response = asyncio.run(server.call_tool("generate_newbro_mining_plan", arguments or {}))
+    return response[0].text
+
+
+def test_generate_mining_tool_is_registered():
+    tools = asyncio.run(server.list_tools())
+    names = [tool.name for tool in tools]
+    assert "generate_newbro_mining_plan" in names
+
+
+def test_happy_path_contains_all_required_sections(monkeypatch):
+    monkeypatch.setattr(server, "fetch_wiki", _build_fake_fetch())
+    text = _call_plan_tool()
+
+    required_sections = [
+        "## Profile + Assumptions",
+        "## Day 1 Plan",
+        "## Week 1 Plan",
+        "## Shopping List",
+        "## Skill Priorities (Alpha-safe)",
+        "## Safety and Loss Prevention",
+        "## If Things Go Wrong",
+        "## Next Session Check-in Questions",
+        "## Sources",
+    ]
+    for section in required_sections:
+        assert section in text
+
+
+def test_citation_policy_has_source_lines_for_major_sections(monkeypatch):
+    monkeypatch.setattr(server, "fetch_wiki", _build_fake_fetch())
+    text = _call_plan_tool()
+
+    assert text.count("Source: https://wiki.eveuniversity.org/wiki/") >= 8
+
+
+def test_input_validation_enforces_bounds_and_enums(monkeypatch):
+    monkeypatch.setattr(server, "fetch_wiki", _build_fake_fetch())
+
+    text = _call_plan_tool({"hours_per_session": 0.1})
+    assert "hours_per_session must be between 0.5 and 8.0" in text
+
+    text = _call_plan_tool({"sessions_per_week": 20})
+    assert "sessions_per_week must be between 1 and 14" in text
+
+    text = _call_plan_tool({"experience_level": "returning"})
+    assert "experience_level must be one of: brand_new" in text
+
+
+def test_branching_low_capital_and_loss_recovery(monkeypatch):
+    monkeypatch.setattr(server, "fetch_wiki", _build_fake_fetch())
+    text = _call_plan_tool(
+        {
+            "starting_isk": 0,
+            "recent_outcome": "I got ganked and my ship was destroyed.",
+        }
+    )
+
+    assert "low-capital" in text.lower()
+    assert "ship loss" in text.lower()
+
+
+def test_timeout_resilience_returns_degraded_but_usable_plan(monkeypatch):
+    monkeypatch.setattr(server, "fetch_wiki", _build_fake_fetch(timeout_mode=True))
+    text = _call_plan_tool()
+
+    assert "## Day 1 Plan" in text
+    assert "Reduced confidence" in text
+    assert "Some wiki requests failed during planning" in text

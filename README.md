@@ -18,6 +18,7 @@ Gives Claude up-to-date EVE Online information from the community-maintained EVE
 - **get_eve_wiki_summary** - Get brief page introduction
 - **browse_eve_wiki_category** - Browse pages by category (Ships, Mining, PvP, etc.)
 - **get_related_pages** - Find pages linking to a specific page
+- **generate_newbro_mining_plan** - Build a conservative mining-only onboarding plan for brand-new Alpha players
 
 ## Quick Start
 
@@ -147,6 +148,17 @@ Once connected, ask Claude:
 - "Mining guide for beginners"
 - "PvP basics"
 - "How to make ISK as a new player?"
+
+**Mining Copilot (Newbro):**
+- "Generate a mining-only Day 1 and Week 1 plan for a brand-new Alpha with 1.5h sessions, 4 sessions/week, and 0 starting ISK."
+- "Update my mining plan: I got ganked last session and lost my ship."
+- "Refine my mining plan with this question: what should I buy first if I only have 500k ISK?"
+
+Example usage loop:
+1. Ask for your initial mining plan with time budget + starting ISK.
+2. Play one session and note what happened (losses, ISK earned, blockers).
+3. Paste `recent_outcome` and rerun `generate_newbro_mining_plan`.
+4. Repeat each session to keep the plan adaptive and conservative.
 
 ## Management Commands
 
@@ -423,6 +435,16 @@ curl http://localhost:8000/health
 
 # Test SSE connection
 curl -N http://localhost:8000/sse
+```
+
+### Python Unit Tests (pytest)
+
+```bash
+# Install test runner (if not already installed)
+pip install pytest
+
+# Run unit tests for mining copilot tool
+python -m pytest -q
 ```
 
 ## Contributing

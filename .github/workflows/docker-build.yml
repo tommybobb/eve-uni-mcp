@@ -12,8 +12,33 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Job 0: Run Python tests before building images
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run unit tests
+        run: python -m pytest -q tests
+
   # Job 1: Build the Docker image on GitHub's cloud runners
   build:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read

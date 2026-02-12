@@ -8,16 +8,17 @@ Supports both stdio (local) and SSE (containerized/remote) transports
 
 import os
 import sys
-from mcp.server import Server
-from mcp.types import Tool, TextContent
-import httpx
-import html2text
+from collections import defaultdict
 from typing import Any
+from urllib.parse import quote
 import asyncio
 import logging
-from urllib.parse import quote
 import time
-from collections import defaultdict
+
+import html2text
+import httpx
+from mcp.server import Server
+from mcp.types import TextContent, Tool
 
 # Configure logging
 logging.basicConfig(
@@ -103,6 +104,482 @@ async def fetch_wiki(params: dict) -> dict:
         except Exception as e:
             logger.exception("Wiki API request failed")
             return {"error": {"info": "Request failed. Please try again later."}}
+
+
+MINING_PLAN_MAX_FREEFORM_LENGTH = 1200
+MINING_SEED_QUERIES = [
+    "EVE University mining guide",
+    "Venture",
+    "Mining frigates",
+    "Career Agents mining",
+    "Highsec mining safety",
+    "Ore and mining mechanics",
+    "Fitting ships for mining",
+]
+MINING_RELEVANCE_KEYWORDS = {
+    "mining": 8,
+    "venture": 8,
+    "ore": 5,
+    "asteroid": 4,
+    "highsec": 4,
+    "safety": 4,
+    "career": 3,
+    "agent": 3,
+    "fit": 3,
+    "fitting": 3,
+    "barge": 2,
+    "alpha": 2,
+}
+MINING_PLAN_SECTION_ORDER = [
+    "Profile + Assumptions",
+    "Day 1 Plan",
+    "Week 1 Plan",
+    "Shopping List",
+    "Skill Priorities (Alpha-safe)",
+    "Safety and Loss Prevention",
+    "If Things Go Wrong",
+    "Next Session Check-in Questions",
+    "Sources",
+]
+SECTION_KEYWORDS = {
+    "Profile + Assumptions": ["mining", "career", "venture"],
+    "Day 1 Plan": ["career", "venture", "mining"],
+    "Week 1 Plan": ["mining", "ore", "venture"],
+    "Shopping List": ["venture", "fitting", "mining"],
+    "Skill Priorities (Alpha-safe)": ["skills", "mining", "alpha"],
+    "Safety and Loss Prevention": ["safety", "highsec", "gank"],
+    "If Things Go Wrong": ["safety", "venture", "mining"],
+    "Next Session Check-in Questions": ["mining", "career"],
+}
+
+
+def validate_numeric_input(
+    value: Any,
+    min_value: float,
+    max_value: float,
+    field_name: str,
+    integer_only: bool = False,
+) -> tuple[bool, str]:
+    """Validate numeric fields for planner input."""
+    if integer_only:
+        if not isinstance(value, int) or isinstance(value, bool):
+            return False, f"{field_name} must be an integer between {int(min_value)} and {int(max_value)}"
+    else:
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return False, f"{field_name} must be a number between {min_value} and {max_value}"
+
+    if value < min_value or value > max_value:
+        if integer_only:
+            return False, f"{field_name} must be between {int(min_value)} and {int(max_value)}"
+        return False, f"{field_name} must be between {min_value} and {max_value}"
+    return True, ""
+
+
+def validate_enum_input(value: Any, allowed_values: list[str], field_name: str) -> tuple[bool, str]:
+    """Validate enum values with a clear allowed list."""
+    if not isinstance(value, str):
+        return False, f"{field_name} must be one of: {', '.join(allowed_values)}"
+    if value not in allowed_values:
+        return False, f"{field_name} must be one of: {', '.join(allowed_values)}"
+    return True, ""
+
+
+def validate_optional_text_input(value: Any, max_length: int, field_name: str) -> tuple[bool, str]:
+    """Validate optional freeform text fields."""
+    if not isinstance(value, str):
+        return False, f"{field_name} must be a string"
+    if len(value) > max_length:
+        return False, f"{field_name} exceeds maximum length of {max_length}"
+    if "\x00" in value:
+        return False, f"{field_name} contains invalid characters"
+    return True, ""
+
+
+def build_wiki_url(title: str) -> str:
+    """Build a safe wiki URL from a page title."""
+    return f"https://wiki.eveuniversity.org/wiki/{quote(title.replace(' ', '_'), safe='')}"
+
+
+def score_mining_candidate(title: str, description: str, query: str) -> int:
+    """Score page relevance for newbro mining planning."""
+    text = f"{title} {description}".lower()
+    score = 0
+    for keyword, weight in MINING_RELEVANCE_KEYWORDS.items():
+        if keyword in text:
+            score += weight
+
+    for token in query.lower().split():
+        if token in text:
+            score += 1
+    return score
+
+
+def normalize_mining_plan_inputs(arguments: Any) -> tuple[dict[str, Any] | None, str]:
+    """Apply defaults and validate inputs for mining planner tool."""
+    if arguments is None:
+        arguments = {}
+
+    if not isinstance(arguments, dict):
+        return None, "arguments must be an object"
+
+    defaults = {
+        "hours_per_session": 1.5,
+        "sessions_per_week": 4,
+        "starting_isk": 0,
+        "experience_level": "brand_new",
+        "risk_preference": "conservative",
+        "current_assets": "",
+        "recent_outcome": "",
+        "questions": "",
+    }
+    normalized = defaults.copy()
+    normalized.update(arguments)
+
+    valid, error_msg = validate_numeric_input(
+        normalized["hours_per_session"], 0.5, 8.0, "hours_per_session"
+    )
+    if not valid:
+        return None, error_msg
+
+    valid, error_msg = validate_numeric_input(
+        normalized["sessions_per_week"], 1, 14, "sessions_per_week", integer_only=True
+    )
+    if not valid:
+        return None, error_msg
+
+    valid, error_msg = validate_numeric_input(
+        normalized["starting_isk"], 0, 10_000_000_000, "starting_isk", integer_only=True
+    )
+    if not valid:
+        return None, error_msg
+
+    valid, error_msg = validate_enum_input(
+        normalized["experience_level"], ["brand_new"], "experience_level"
+    )
+    if not valid:
+        return None, error_msg
+
+    valid, error_msg = validate_enum_input(
+        normalized["risk_preference"], ["conservative"], "risk_preference"
+    )
+    if not valid:
+        return None, error_msg
+
+    for field in ["current_assets", "recent_outcome", "questions"]:
+        valid, error_msg = validate_optional_text_input(
+            normalized[field], MINING_PLAN_MAX_FREEFORM_LENGTH, field
+        )
+        if not valid:
+            return None, error_msg
+
+    return normalized, ""
+
+
+def _extract_summary_from_query_response(data: dict, fallback_title: str) -> str:
+    """Extract plain summary text from MediaWiki query response."""
+    pages = data.get("query", {}).get("pages", {})
+    if not pages:
+        return ""
+    page = next(iter(pages.values()))
+    if "missing" in page:
+        return ""
+    extract = page.get("extract", "")
+    if not extract:
+        return ""
+    return extract.strip()
+
+
+async def gather_mining_wiki_context() -> dict[str, Any]:
+    """Retrieve, rank, and summarize mining-focused wiki context."""
+    candidates: dict[str, dict[str, Any]] = {}
+    errors: list[str] = []
+
+    for query in MINING_SEED_QUERIES:
+        data = await fetch_wiki(
+            {
+                "action": "opensearch",
+                "search": query,
+                "limit": 8,
+                "format": "json",
+                "namespace": "0",
+            }
+        )
+
+        if "error" in data:
+            errors.append(f"search:{query}")
+            continue
+
+        titles = data[1] if len(data) > 1 else []
+        descriptions = data[2] if len(data) > 2 else []
+        urls = data[3] if len(data) > 3 else []
+
+        for idx, title in enumerate(titles):
+            desc = descriptions[idx] if idx < len(descriptions) else ""
+            url = urls[idx] if idx < len(urls) and urls[idx] else build_wiki_url(title)
+            score = score_mining_candidate(title, desc, query)
+            key = title.lower()
+
+            if key not in candidates:
+                candidates[key] = {
+                    "title": title,
+                    "description": desc,
+                    "url": url,
+                    "score": score,
+                }
+            elif score > candidates[key]["score"]:
+                candidates[key]["score"] = score
+                candidates[key]["description"] = desc
+                candidates[key]["url"] = url
+
+    ranked_candidates = sorted(
+        candidates.values(),
+        key=lambda item: (item["score"], item["title"].lower()),
+        reverse=True,
+    )
+
+    if not ranked_candidates:
+        ranked_candidates = [
+            {
+                "title": "Mining",
+                "description": "General mining overview",
+                "url": build_wiki_url("Mining"),
+                "score": 1,
+            }
+        ]
+
+    summaries: dict[str, str] = {}
+    page_snippets: dict[str, str] = {}
+
+    for candidate in ranked_candidates[:8]:
+        title = candidate["title"]
+        summary_data = await fetch_wiki(
+            {
+                "action": "query",
+                "prop": "extracts",
+                "exintro": "true",
+                "explaintext": "true",
+                "titles": title,
+                "format": "json",
+            }
+        )
+
+        if "error" in summary_data:
+            errors.append(f"summary:{title}")
+            continue
+
+        summary_text = _extract_summary_from_query_response(summary_data, title)
+        if summary_text:
+            summaries[title] = summary_text
+
+    for candidate in ranked_candidates[:3]:
+        title = candidate["title"]
+        if len(summaries.get(title, "")) >= 180:
+            continue
+
+        page_data = await fetch_wiki(
+            {
+                "action": "parse",
+                "page": title,
+                "prop": "text",
+                "format": "json",
+                "disabletoc": "true",
+            }
+        )
+
+        if "error" in page_data:
+            errors.append(f"page:{title}")
+            continue
+
+        try:
+            markdown_content = h.handle(page_data["parse"]["text"]["*"])
+            page_snippets[title] = markdown_content.strip()[:600]
+        except Exception:
+            errors.append(f"page-parse:{title}")
+
+    fallback_url = ranked_candidates[0]["url"]
+    section_citations: dict[str, str] = {}
+    for section_name in SECTION_KEYWORDS:
+        section_url = ""
+        keywords = SECTION_KEYWORDS[section_name]
+        for candidate in ranked_candidates:
+            haystack = f"{candidate['title']} {candidate['description']}".lower()
+            if any(keyword in haystack for keyword in keywords):
+                section_url = candidate["url"]
+                break
+        section_citations[section_name] = section_url or fallback_url
+
+    return {
+        "ranked_candidates": ranked_candidates,
+        "summaries": summaries,
+        "page_snippets": page_snippets,
+        "errors": errors,
+        "partial": len(errors) > 0,
+        "section_citations": section_citations,
+    }
+
+
+def _format_source(section_name: str, context: dict[str, Any]) -> str:
+    """Format a source line for a section."""
+    url = context.get("section_citations", {}).get(section_name, "")
+    if not url:
+        url = build_wiki_url("Mining")
+    return f"Source: {url}"
+
+
+def build_mining_plan_markdown(profile: dict[str, Any], context: dict[str, Any]) -> str:
+    """Build deterministic mining onboarding plan with citations."""
+    hours_per_session = float(profile["hours_per_session"])
+    sessions_per_week = int(profile["sessions_per_week"])
+    starting_isk = int(profile["starting_isk"])
+    recent_outcome = profile["recent_outcome"].lower()
+    player_questions = profile["questions"].strip()
+    assets = profile["current_assets"].strip() or "No assets provided"
+
+    if hours_per_session <= 1.0:
+        day1_tasks = 3
+    elif hours_per_session <= 2.5:
+        day1_tasks = 4
+    else:
+        day1_tasks = 5
+
+    week_target_sessions = min(sessions_per_week, 7)
+    low_capital_mode = starting_isk <= 0
+    recovery_mode = any(token in recent_outcome for token in ["lost", "killed", "ganked", "destroyed", "death"])
+    low_isk_recovery = any(token in recent_outcome for token in ["broke", "low isk", "no isk", "can't afford"])
+    confusion_mode = any(token in recent_outcome for token in ["stuck", "confused", "overwhelmed", "not sure", "dont know", "don't know"])
+
+    confidence_line = "Normal confidence: Wiki retrieval completed for core mining pages."
+    if context.get("partial"):
+        confidence_line = (
+            "Reduced confidence: some wiki pages timed out or failed; plan uses partial context and conservative defaults."
+        )
+
+    shopping_header = "Start with low-capital purchases only." if low_capital_mode else "Use your starting ISK to front-load survivability."
+    if starting_isk >= 2_000_000:
+        shopping_header = "Prioritize a complete Venture fitting and spare replacements."
+
+    if recovery_mode:
+        fallback_intro = "You reported a ship loss. Switch to a safer high-sec loop for the next 2 sessions."
+    elif low_isk_recovery:
+        fallback_intro = "You reported low ISK pressure. Run a low-capital recovery loop before upgrades."
+    elif confusion_mode:
+        fallback_intro = "You reported confusion/stall. Use a simplified 3-task session to regain momentum."
+    else:
+        fallback_intro = "If progress stalls, fall back to a short high-sec routine and reassess after one session."
+
+    day1_items = [
+        "Complete the mining-focused Career Agent steps and accept all tutorial rewards.",
+        "Acquire or verify access to a Venture hull and fit basic mining modules.",
+        "Run a short high-sec mining session and record ISK earned, cargo cycles, and travel time.",
+        "Create one bookmark for station tether/dock and one for your preferred belt entry.",
+        "Set overview and d-scan habits before undocking again.",
+    ][:day1_tasks]
+
+    week1_items = [
+        f"Run {week_target_sessions} mining sessions in high-sec with a short pre-undock safety check.",
+        "After each session, review: ISK/hour, number of interruptions, and risk events.",
+        "Upgrade fitting only when you can afford replacement of your current ship and modules.",
+        "Practice route discipline: avoid predictable belts when local activity spikes.",
+        "At end of week, choose one improvement goal: cycle uptime, hauling efficiency, or survival habits.",
+    ]
+
+    if confusion_mode:
+        week1_items[1] = "Keep each session to three goals: undock safely, fill hold once, dock safely."
+
+    lines = [
+        "# Newbro Mining Copilot Plan",
+        "",
+        "## Profile + Assumptions",
+        f"- Experience level: {profile['experience_level']}",
+        f"- Risk preference: {profile['risk_preference']}",
+        f"- Time budget: {hours_per_session:.1f}h/session, {sessions_per_week} sessions/week",
+        f"- Starting ISK: {starting_isk:,}",
+        f"- Current assets: {assets}",
+        f"- Confidence: {confidence_line}",
+        _format_source("Profile + Assumptions", context),
+        "",
+        "## Day 1 Plan",
+    ]
+    lines.extend([f"{idx + 1}. {item}" for idx, item in enumerate(day1_items)])
+    lines.extend(
+        [
+            "Completion criteria: one safe undock-to-dock mining run with notes captured.",
+            _format_source("Day 1 Plan", context),
+            "",
+            "## Week 1 Plan",
+        ]
+    )
+    lines.extend([f"{idx + 1}. {item}" for idx, item in enumerate(week1_items)])
+    lines.extend(
+        [
+            "Completion criteria: at least 3 logged sessions and one deliberate fitting/behavior improvement.",
+            _format_source("Week 1 Plan", context),
+            "",
+            "## Shopping List",
+            f"- {shopping_header}",
+            "- Venture hull (or replacement hull if already owned).",
+            "- Basic mining lasers and low-cost tank modules before yield upgrades.",
+            "- Mobile reserve: keep enough ISK for one full replacement before risky upgrades.",
+            _format_source("Shopping List", context),
+            "",
+            "## Skill Priorities (Alpha-safe)",
+            "1. Core fitting/powergrid/capacitor support to stabilize your fit.",
+            "2. Mining throughput and mining frigate support skills.",
+            "3. Basic navigation and survivability skills before yield-only specialization.",
+            "4. Queue short skills first for immediate quality-of-life gains.",
+            _format_source("Skill Priorities (Alpha-safe)", context),
+            "",
+            "## Safety and Loss Prevention",
+            "1. Mine in high-sec systems with manageable local traffic and clear docking options.",
+            "2. Treat every undock as disposable: never fly what you cannot replace.",
+            "3. Pre-align and monitor local/d-scan; dock immediately on suspicious spikes.",
+            "4. Avoid autopilot hauling of ore value you cannot lose.",
+            _format_source("Safety and Loss Prevention", context),
+            "",
+            "## If Things Go Wrong",
+            f"- {fallback_intro}",
+            "- Recovery loop: one short safe run, sell ore, refill replacement fund, reassess fit.",
+            "- If two losses happen in a row, downgrade risk and focus on safety drills only.",
+            _format_source("If Things Go Wrong", context),
+            "",
+            "## Next Session Check-in Questions",
+            "1. Did you complete a safe undock -> mine -> dock cycle?",
+            "2. What blocked you most: travel, fitting, safety pressure, or income?",
+            "3. Do you currently have replacement ISK for your active ship?",
+            "4. Which single change should the next plan optimize first?",
+        ]
+    )
+    if player_questions:
+        lines.append(f"5. Player focus question to address next: {player_questions}")
+    lines.extend(
+        [
+            _format_source("Next Session Check-in Questions", context),
+            "",
+            "## Sources",
+        ]
+    )
+
+    source_urls = []
+    for candidate in context.get("ranked_candidates", [])[:10]:
+        url = candidate.get("url", "")
+        title = candidate.get("title", "")
+        if not url or url in source_urls:
+            continue
+        source_urls.append(url)
+        lines.append(f"- {title}: {url}")
+
+    if not source_urls:
+        lines.append(f"- Mining: {build_wiki_url('Mining')}")
+
+    if context.get("errors"):
+        lines.extend(
+            [
+                "",
+                "Note: Some wiki requests failed during planning. Retry for fresher/complete citations.",
+            ]
+        )
+
+    return "\n".join(lines)
 
 
 @app.list_tools()
@@ -198,6 +675,56 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["title"]
+            }
+        ),
+        Tool(
+            name="generate_newbro_mining_plan",
+            description="Generate a conservative mining-only onboarding strategy for a brand-new Alpha player with wiki citations",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "hours_per_session": {
+                        "type": "number",
+                        "minimum": 0.5,
+                        "maximum": 8,
+                        "default": 1.5
+                    },
+                    "sessions_per_week": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 14,
+                        "default": 4
+                    },
+                    "starting_isk": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0
+                    },
+                    "experience_level": {
+                        "type": "string",
+                        "enum": ["brand_new"],
+                        "default": "brand_new"
+                    },
+                    "risk_preference": {
+                        "type": "string",
+                        "enum": ["conservative"],
+                        "default": "conservative"
+                    },
+                    "current_assets": {
+                        "type": "string",
+                        "default": ""
+                    },
+                    "recent_outcome": {
+                        "type": "string",
+                        "description": "What happened last session; used for replanning",
+                        "default": ""
+                    },
+                    "questions": {
+                        "type": "string",
+                        "default": ""
+                    }
+                },
+                "required": []
             }
         )
     ]
@@ -471,7 +998,16 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 type="text",
                 text="❌ Error finding related pages. Please try again."
             )]
-    
+
+    elif name == "generate_newbro_mining_plan":
+        normalized, error_msg = normalize_mining_plan_inputs(arguments)
+        if not normalized:
+            return [TextContent(type="text", text=f"❌ {error_msg}")]
+
+        context = await gather_mining_wiki_context()
+        plan_markdown = build_mining_plan_markdown(normalized, context)
+        return [TextContent(type="text", text=plan_markdown)]
+
     return [TextContent(
         type="text",
         text=f"❌ Unknown tool: {name}"
@@ -495,65 +1031,19 @@ async def _noop_asgi_response(scope, receive, send):
     pass
 
 
-async def run_sse():
-    """Run with SSE transport (for containerized/remote use)"""
+def create_sse_starlette_app():
+    """Create Starlette app for SSE transport with auth/rate-limit middleware."""
     from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
-    from starlette.routing import Route, Mount
-    from starlette.responses import JSONResponse
-    from starlette.requests import Request
     from starlette.middleware import Middleware
+    from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.middleware.cors import CORSMiddleware
-    import uvicorn
+    from starlette.requests import Request
+    from starlette.responses import JSONResponse
+    from starlette.routing import Mount, Route
 
     # CORS configuration - restrictive by default
     cors_origins = os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else []
-    
-    # Authentication middleware
-    async def auth_middleware(request: Request, call_next):
-        """Optional token-based authentication"""
-        if AUTH_TOKEN:
-            # Skip auth for health endpoint
-            if request.url.path == "/health":
-                return await call_next(request)
-            
-            auth_header = request.headers.get("Authorization", "")
-            token = auth_header.replace("Bearer ", "").strip()
-            
-            if token != AUTH_TOKEN:
-                logger.warning("Unauthorized access attempt from %s", request.client.host if request.client else "unknown")
-                return JSONResponse(
-                    {"error": "Unauthorized"},
-                    status_code=401
-                )
-        
-        return await call_next(request)
-    
-    # Rate limiting middleware
-    async def rate_limit_middleware(request: Request, call_next):
-        """Simple rate limiting based on client IP"""
-        # Skip rate limiting for health endpoint
-        if request.url.path == "/health":
-            return await call_next(request)
-        
-        client_id = request.client.host if request.client else "unknown"
-        
-        if not check_rate_limit(client_id):
-            logger.warning("Rate limit exceeded for client: %s", client_id)
-            return JSONResponse(
-                {"error": "Rate limit exceeded. Please try again later."},
-                status_code=429
-            )
-        
-        return await call_next(request)
-
-    # Health check endpoint
-    async def health(request):
-        return JSONResponse({
-            "status": "healthy",
-            "service": "eve-university-wiki-mcp",
-            "version": "1.1.0"
-        })
 
     # Create SSE endpoint handler
     sse = SseServerTransport("/messages/")
@@ -574,8 +1064,56 @@ async def run_sse():
         # TypeError when it tries to call the return value as a Response.
         return _noop_asgi_response
 
+    # Health check endpoint
+    async def health(request):
+        return JSONResponse({
+            "status": "healthy",
+            "service": "eve-university-wiki-mcp",
+            "version": "1.2.0"
+        })
+
+    # Authentication middleware
+    async def auth_middleware(request: Request, call_next):
+        """Optional token-based authentication."""
+        if AUTH_TOKEN:
+            # Skip auth for health endpoint
+            if request.url.path == "/health":
+                return await call_next(request)
+
+            auth_header = request.headers.get("Authorization", "")
+            token = auth_header.replace("Bearer ", "").strip()
+
+            if token != AUTH_TOKEN:
+                logger.warning(
+                    "Unauthorized access attempt from %s",
+                    request.client.host if request.client else "unknown"
+                )
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+        return await call_next(request)
+
+    # Rate limiting middleware
+    async def rate_limit_middleware(request: Request, call_next):
+        """Simple rate limiting based on client IP."""
+        # Skip rate limiting for health endpoint
+        if request.url.path == "/health":
+            return await call_next(request)
+
+        client_id = request.client.host if request.client else "unknown"
+        if not check_rate_limit(client_id):
+            logger.warning("Rate limit exceeded for client: %s", client_id)
+            return JSONResponse(
+                {"error": "Rate limit exceeded. Please try again later."},
+                status_code=429
+            )
+
+        return await call_next(request)
+
     # Build middleware stack
-    middleware = []
+    middleware = [
+        Middleware(BaseHTTPMiddleware, dispatch=auth_middleware),
+        Middleware(BaseHTTPMiddleware, dispatch=rate_limit_middleware),
+    ]
 
     if cors_origins:
         middleware.append(
@@ -588,7 +1126,7 @@ async def run_sse():
             )
         )
 
-    starlette_app = Starlette(
+    return Starlette(
         routes=[
             Route("/sse", endpoint=handle_sse),
             Mount("/messages/", app=sse.handle_post_message),
@@ -596,6 +1134,12 @@ async def run_sse():
         ],
         middleware=middleware
     )
+
+
+async def run_sse():
+    """Run with SSE transport (for containerized/remote use)"""
+    import uvicorn
+    starlette_app = create_sse_starlette_app()
 
     # Get configuration from environment
     host = os.getenv("MCP_HOST", "0.0.0.0")

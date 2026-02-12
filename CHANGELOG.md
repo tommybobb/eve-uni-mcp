@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-02-12
+
+### Added
+- New MCP tool: `generate_newbro_mining_plan`
+  - Mining-only onboarding strategy for brand-new Alpha players
+  - Stateless input profile (`hours_per_session`, `sessions_per_week`, `starting_isk`, `recent_outcome`, etc.)
+  - Structured Markdown output with fixed sections:
+    - Profile + Assumptions
+    - Day 1 Plan
+    - Week 1 Plan
+    - Shopping List
+    - Skill Priorities (Alpha-safe)
+    - Safety and Loss Prevention
+    - If Things Go Wrong
+    - Next Session Check-in Questions
+    - Sources
+- Internal retrieval pipeline for planning:
+  - Mining seed searches
+  - Candidate ranking by mining/safety relevance
+  - Summary fetches with fallback page snippet retrieval
+  - Section-level citation mapping
+- Automated unit tests for mining copilot behavior in `tests/test_mining_newbro_copilot.py`
+
+### Changed
+- Health endpoint version updated to `1.2.0`
+- README updated with:
+  - New tool listing
+  - Mining copilot prompt examples
+  - Session-by-session usage loop
+  - `pytest` test instructions
+
 ## [1.1.0] - 2026-02-11
 
 ### Security
@@ -129,6 +160,7 @@ Versions follow Semantic Versioning (MAJOR.MINOR.PATCH):
 
 ---
 
-[Unreleased]: https://github.com/tommybobb/eve-wiki-mcp/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/tommybobb/eve-wiki-mcp/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/tommybobb/eve-wiki-mcp/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/tommybobb/eve-wiki-mcp/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/tommybobb/eve-wiki-mcp/releases/tag/v1.0.0
