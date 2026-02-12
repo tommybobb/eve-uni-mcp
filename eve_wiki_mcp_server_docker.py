@@ -1104,18 +1104,21 @@ def create_sse_starlette_app():
         # TypeError when it tries to call the return value as a Response.
         return _noop_asgi_response
 
-    async def handle_messages(request: Request):
+    async def handle_messages_asgi(scope, receive, send):
+        # Keep /messages/ as mounted ASGI app for MCP transport compatibility.
+        request = Request(scope, receive=receive)
+
         auth_error = await authorize_request(request)
         if auth_error:
-            return auth_error
+            await auth_error(scope, receive, send)
+            return
 
         rate_error = await enforce_rate_limit(request)
         if rate_error:
-            return rate_error
+            await rate_error(scope, receive, send)
+            return
 
-        await sse.handle_post_message(request.scope, request.receive, request._send)
-        # POST response was already sent by sse.handle_post_message.
-        return _noop_asgi_response
+        await sse.handle_post_message(scope, receive, send)
 
     # Health check endpoint
     async def health(request):
@@ -1142,7 +1145,7 @@ def create_sse_starlette_app():
     return Starlette(
         routes=[
             Route("/sse", endpoint=handle_sse),
-            Route("/messages/", endpoint=handle_messages, methods=["POST"]),
+            Mount("/messages/", app=handle_messages_asgi),
             Route("/health", endpoint=health, methods=["GET"]),
         ],
         middleware=middleware
