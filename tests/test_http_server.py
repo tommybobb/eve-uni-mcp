@@ -98,3 +98,36 @@ def test_messages_allows_initialize_request_before_session_init():
 
     # Shape may be invalid for MCP, but initialize must not be blocked by our pre-init gate.
     assert response.status_code != 409
+
+
+def test_messages_allows_initialized_notification_before_session_init():
+    app = server.create_sse_starlette_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/messages/?session_id=test-session",
+        json={
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {},
+        },
+    )
+
+    assert response.status_code != 409
+
+
+def test_messages_allows_ping_before_session_init():
+    app = server.create_sse_starlette_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/messages/?session_id=test-session",
+        json={
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "ping",
+            "params": {},
+        },
+    )
+
+    assert response.status_code != 409

@@ -1093,18 +1093,30 @@ def create_sse_starlette_app():
 
         return replay_receive
 
-    def parse_jsonrpc_method(body: bytes) -> str:
-        """Return JSON-RPC method if this payload is a single request object."""
+    def parse_jsonrpc_methods(body: bytes) -> list[str]:
+        """Return JSON-RPC methods found in request payload (single or batch)."""
         if not body:
-            return ""
+            return []
         try:
             payload = json.loads(body.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
-            return ""
-        if not isinstance(payload, dict):
-            return ""
-        method = payload.get("method", "")
-        return method if isinstance(method, str) else ""
+            return []
+
+        if isinstance(payload, dict):
+            method = payload.get("method", "")
+            return [method] if isinstance(method, str) and method else []
+
+        if isinstance(payload, list):
+            methods: list[str] = []
+            for item in payload:
+                if not isinstance(item, dict):
+                    continue
+                method = item.get("method", "")
+                if isinstance(method, str) and method:
+                    methods.append(method)
+            return methods
+
+        return []
 
     async def authorize_request(request: Request):
         """Return JSONResponse on auth failure, else None."""
@@ -1190,37 +1202,22 @@ def create_sse_starlette_app():
             session_lock = get_session_lock(session_id)
             async with session_lock:
                 session_state = session_init_state.setdefault(
-                    session_id, {"seen_initialize": False, "initialized": False}
+                    session_id, {"initialized": False}
                 )
-                method = parse_jsonrpc_method(body)
+                methods = parse_jsonrpc_methods(body)
 
                 if not session_state["initialized"]:
-                    if method == "initialize":
-                        session_state["seen_initialize"] = True
-                    elif method == "notifications/initialized":
-                        if session_state["seen_initialize"]:
-                            session_state["initialized"] = True
-                        else:
-                            logger.warning(
-                                "Rejected out-of-order MCP request for session %s: %s",
-                                session_id,
-                                method,
-                            )
-                            await JSONResponse(
-                                {
-                                    "error": (
-                                        "MCP session is not initialized. "
-                                        "Send initialize before notifications/initialized."
-                                    )
-                                },
-                                status_code=409,
-                            )(scope, replay_receive_from_body(b""), send)
-                            return
-                    elif method:
+                    # Align with MCP server semantics:
+                    # - initialize request is enough to transition to initialized
+                    # - initialized notification is also accepted
+                    # - ping is valid at any time
+                    if "initialize" in methods or "notifications/initialized" in methods:
+                        session_state["initialized"] = True
+                    elif methods and not set(methods).issubset({"ping"}):
                         logger.warning(
                             "Rejected pre-initialization MCP request for session %s: %s",
                             session_id,
-                            method,
+                            ", ".join(methods),
                         )
                         await JSONResponse(
                             {
