@@ -39,6 +39,8 @@ MAX_TITLE_LENGTH = 500
 MAX_CATEGORY_LENGTH = 200
 AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN", "")
 MCP_ENFORCE_HTTP_GUARDS = os.getenv("MCP_ENFORCE_HTTP_GUARDS", "false").lower() == "true"
+MCP_SSE_DEBUG = os.getenv("MCP_SSE_DEBUG", "false").lower() == "true"
+MCP_SSE_DEBUG_BODY_PREVIEW_CHARS = int(os.getenv("MCP_SSE_DEBUG_BODY_PREVIEW_CHARS", "220"))
 
 # Rate limiting configuration
 RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "60"))  # requests per window
@@ -88,6 +90,21 @@ def check_rate_limit(client_id: str) -> bool:
     # Add current request
     rate_limit_store[client_id].append(now)
     return True
+
+
+def _short_session_id(session_id: str) -> str:
+    """Return a short session id for readable logs."""
+    if not session_id:
+        return "none"
+    if len(session_id) <= 12:
+        return session_id
+    return f"{session_id[:8]}...{session_id[-4:]}"
+
+
+def log_sse_debug(message: str, *args) -> None:
+    """Emit opt-in transport debug logs at INFO level."""
+    if MCP_SSE_DEBUG:
+        logger.info("[MCP_SSE_DEBUG] " + message, *args)
 
 
 async def fetch_wiki(params: dict) -> dict:
@@ -1045,6 +1062,7 @@ def create_sse_starlette_app():
 
     # CORS configuration - restrictive by default
     cors_origins = os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else []
+    log_sse_debug("SSE debug logging enabled")
 
     # Create SSE endpoint handler
     sse = SseServerTransport("/messages/")
@@ -1065,6 +1083,15 @@ def create_sse_starlette_app():
         params = parse_qs(query_string)
         values = params.get("session_id", [])
         return values[0] if values else ""
+
+    def body_preview(body: bytes) -> str:
+        """Create a bounded body preview for debug logs."""
+        if not body:
+            return ""
+        preview = body.decode("utf-8", errors="replace")
+        if len(preview) > MCP_SSE_DEBUG_BODY_PREVIEW_CHARS:
+            return preview[:MCP_SSE_DEBUG_BODY_PREVIEW_CHARS] + "...(truncated)"
+        return preview
 
     async def read_http_body(receive) -> bytes:
         """Read and buffer the full HTTP request body from ASGI receive."""
@@ -1100,6 +1127,7 @@ def create_sse_starlette_app():
         try:
             payload = json.loads(body.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
+            log_sse_debug("Failed to parse JSON-RPC body for method discovery; body=%s", body_preview(body))
             return []
 
         if isinstance(payload, dict):
@@ -1158,12 +1186,16 @@ def create_sse_starlette_app():
         return None
 
     async def handle_sse(request: Request):
+        client_host = request.client.host if request.client else "unknown"
+        log_sse_debug("GET /sse from client=%s", client_host)
         auth_error = await authorize_request(request)
         if auth_error:
+            log_sse_debug("SSE request denied by auth for client=%s", client_host)
             return auth_error
 
         rate_error = await enforce_rate_limit(request)
         if rate_error:
+            log_sse_debug("SSE request denied by rate-limit for client=%s", client_host)
             return rate_error
 
         async with sse.connect_sse(
@@ -1176,6 +1208,7 @@ def create_sse_starlette_app():
                 write_stream,
                 app.create_initialization_options()
             )
+        log_sse_debug("SSE session closed for client=%s", client_host)
         # SSE response was already sent via the raw ASGI send callable.
         # Return a no-op ASGI response to prevent Starlette from raising
         # TypeError when it tries to call the return value as a Response.
@@ -1197,6 +1230,15 @@ def create_sse_starlette_app():
 
         body = await read_http_body(receive)
         session_id = get_session_id(scope)
+        methods = parse_jsonrpc_methods(body)
+        client_host = request.client.host if request.client else "unknown"
+        log_sse_debug(
+            "POST /messages client=%s session=%s methods=%s body_bytes=%d",
+            client_host,
+            _short_session_id(session_id),
+            methods if methods else ["<unknown>"],
+            len(body),
+        )
 
         if session_id:
             session_lock = get_session_lock(session_id)
@@ -1204,7 +1246,12 @@ def create_sse_starlette_app():
                 session_state = session_init_state.setdefault(
                     session_id, {"initialized": False}
                 )
-                methods = parse_jsonrpc_methods(body)
+                log_sse_debug(
+                    "Session state before dispatch session=%s initialized=%s methods=%s",
+                    _short_session_id(session_id),
+                    session_state["initialized"],
+                    methods if methods else ["<unknown>"],
+                )
 
                 if not session_state["initialized"]:
                     # Align with MCP server semantics:
@@ -1213,11 +1260,22 @@ def create_sse_starlette_app():
                     # - ping is valid at any time
                     if "initialize" in methods or "notifications/initialized" in methods:
                         session_state["initialized"] = True
+                        log_sse_debug(
+                            "Session marked initialized session=%s trigger=%s",
+                            _short_session_id(session_id),
+                            "initialize" if "initialize" in methods else "notifications/initialized",
+                        )
                     elif methods and not set(methods).issubset({"ping"}):
                         logger.warning(
                             "Rejected pre-initialization MCP request for session %s: %s",
                             session_id,
                             ", ".join(methods),
+                        )
+                        log_sse_debug(
+                            "Rejecting request session=%s methods=%s body=%s",
+                            _short_session_id(session_id),
+                            methods,
+                            body_preview(body),
                         )
                         await JSONResponse(
                             {
@@ -1230,9 +1288,15 @@ def create_sse_starlette_app():
                         )(scope, replay_receive_from_body(b""), send)
                         return
 
+                log_sse_debug(
+                    "Forwarding request to MCP transport session=%s methods=%s",
+                    _short_session_id(session_id),
+                    methods if methods else ["<unknown>"],
+                )
                 await sse.handle_post_message(scope, replay_receive_from_body(body), send)
                 return
 
+        log_sse_debug("Forwarding request without session_id to MCP transport")
         await sse.handle_post_message(scope, replay_receive_from_body(body), send)
 
     # Health check endpoint
