@@ -37,6 +37,7 @@ MAX_QUERY_LENGTH = 500
 MAX_TITLE_LENGTH = 500
 MAX_CATEGORY_LENGTH = 200
 AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN", "")
+MCP_ENFORCE_HTTP_GUARDS = os.getenv("MCP_ENFORCE_HTTP_GUARDS", "false").lower() == "true"
 
 # Rate limiting configuration
 RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "60"))  # requests per window
@@ -1049,6 +1050,9 @@ def create_sse_starlette_app():
 
     async def authorize_request(request: Request):
         """Return JSONResponse on auth failure, else None."""
+        if not MCP_ENFORCE_HTTP_GUARDS:
+            return None
+
         if AUTH_TOKEN:
             # Skip auth for health endpoint
             if request.url.path == "/health":
@@ -1067,6 +1071,9 @@ def create_sse_starlette_app():
 
     async def enforce_rate_limit(request: Request):
         """Return JSONResponse on rate-limit failure, else None."""
+        if not MCP_ENFORCE_HTTP_GUARDS:
+            return None
+
         # Skip rate limiting for health endpoint
         if request.url.path == "/health":
             return None

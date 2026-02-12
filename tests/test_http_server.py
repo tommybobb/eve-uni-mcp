@@ -16,6 +16,7 @@ def test_health_endpoint_returns_service_and_version():
 
 
 def test_auth_required_when_token_is_set(monkeypatch):
+    monkeypatch.setattr(server, "MCP_ENFORCE_HTTP_GUARDS", True)
     monkeypatch.setattr(server, "AUTH_TOKEN", "secret-token")
     app = server.create_sse_starlette_app()
     client = TestClient(app)
@@ -30,6 +31,7 @@ def test_auth_required_when_token_is_set(monkeypatch):
 
 
 def test_rate_limit_returns_429(monkeypatch):
+    monkeypatch.setattr(server, "MCP_ENFORCE_HTTP_GUARDS", True)
     monkeypatch.setattr(server, "AUTH_TOKEN", "")
     monkeypatch.setattr(server, "RATE_LIMIT_REQUESTS", 1)
     monkeypatch.setattr(server, "RATE_LIMIT_WINDOW", 60)
@@ -49,6 +51,7 @@ def test_rate_limit_returns_429(monkeypatch):
 
 
 def test_health_endpoint_bypasses_rate_limit(monkeypatch):
+    monkeypatch.setattr(server, "MCP_ENFORCE_HTTP_GUARDS", True)
     monkeypatch.setattr(server, "AUTH_TOKEN", "")
     monkeypatch.setattr(server, "RATE_LIMIT_REQUESTS", 0)
     monkeypatch.setattr(server, "RATE_LIMIT_WINDOW", 60)
