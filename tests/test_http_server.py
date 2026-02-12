@@ -62,3 +62,39 @@ def test_health_endpoint_bypasses_rate_limit(monkeypatch):
 
     response = client.get("/health")
     assert response.status_code == 200
+
+
+def test_messages_rejects_non_initialize_before_session_init():
+    app = server.create_sse_starlette_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/messages/?session_id=test-session",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/list",
+            "params": {},
+        },
+    )
+
+    assert response.status_code == 409
+    assert "not initialized" in response.json()["error"]
+
+
+def test_messages_allows_initialize_request_before_session_init():
+    app = server.create_sse_starlette_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/messages/?session_id=test-session",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {},
+        },
+    )
+
+    # Shape may be invalid for MCP, but initialize must not be blocked by our pre-init gate.
+    assert response.status_code != 409

@@ -10,8 +10,9 @@ import os
 import sys
 from collections import defaultdict
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote
 import asyncio
+import json
 import logging
 import time
 
@@ -1047,6 +1048,63 @@ def create_sse_starlette_app():
 
     # Create SSE endpoint handler
     sse = SseServerTransport("/messages/")
+    session_request_locks: dict[str, asyncio.Lock] = {}
+    session_init_state: dict[str, dict[str, bool]] = {}
+
+    def get_session_lock(session_id: str) -> asyncio.Lock:
+        """Return a per-session lock to preserve message ordering."""
+        if session_id not in session_request_locks:
+            session_request_locks[session_id] = asyncio.Lock()
+        return session_request_locks[session_id]
+
+    def get_session_id(scope: dict[str, Any]) -> str:
+        """Extract MCP session_id query parameter from ASGI scope."""
+        query_string = scope.get("query_string", b"")
+        if isinstance(query_string, bytes):
+            query_string = query_string.decode("utf-8", errors="ignore")
+        params = parse_qs(query_string)
+        values = params.get("session_id", [])
+        return values[0] if values else ""
+
+    async def read_http_body(receive) -> bytes:
+        """Read and buffer the full HTTP request body from ASGI receive."""
+        chunks: list[bytes] = []
+        while True:
+            message = await receive()
+            if message.get("type") != "http.request":
+                continue
+            body = message.get("body", b"")
+            if body:
+                chunks.append(body)
+            if not message.get("more_body", False):
+                break
+        return b"".join(chunks)
+
+    def replay_receive_from_body(body: bytes):
+        """Build a receive callable that replays a buffered request body."""
+        sent = False
+
+        async def replay_receive():
+            nonlocal sent
+            if sent:
+                return {"type": "http.request", "body": b"", "more_body": False}
+            sent = True
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        return replay_receive
+
+    def parse_jsonrpc_method(body: bytes) -> str:
+        """Return JSON-RPC method if this payload is a single request object."""
+        if not body:
+            return ""
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return ""
+        if not isinstance(payload, dict):
+            return ""
+        method = payload.get("method", "")
+        return method if isinstance(method, str) else ""
 
     async def authorize_request(request: Request):
         """Return JSONResponse on auth failure, else None."""
@@ -1125,7 +1183,60 @@ def create_sse_starlette_app():
             await rate_error(scope, receive, send)
             return
 
-        await sse.handle_post_message(scope, receive, send)
+        body = await read_http_body(receive)
+        session_id = get_session_id(scope)
+
+        if session_id:
+            session_lock = get_session_lock(session_id)
+            async with session_lock:
+                session_state = session_init_state.setdefault(
+                    session_id, {"seen_initialize": False, "initialized": False}
+                )
+                method = parse_jsonrpc_method(body)
+
+                if not session_state["initialized"]:
+                    if method == "initialize":
+                        session_state["seen_initialize"] = True
+                    elif method == "notifications/initialized":
+                        if session_state["seen_initialize"]:
+                            session_state["initialized"] = True
+                        else:
+                            logger.warning(
+                                "Rejected out-of-order MCP request for session %s: %s",
+                                session_id,
+                                method,
+                            )
+                            await JSONResponse(
+                                {
+                                    "error": (
+                                        "MCP session is not initialized. "
+                                        "Send initialize before notifications/initialized."
+                                    )
+                                },
+                                status_code=409,
+                            )(scope, replay_receive_from_body(b""), send)
+                            return
+                    elif method:
+                        logger.warning(
+                            "Rejected pre-initialization MCP request for session %s: %s",
+                            session_id,
+                            method,
+                        )
+                        await JSONResponse(
+                            {
+                                "error": (
+                                    "MCP session is not initialized. "
+                                    "Send initialize before other requests."
+                                )
+                            },
+                            status_code=409,
+                        )(scope, replay_receive_from_body(b""), send)
+                        return
+
+                await sse.handle_post_message(scope, replay_receive_from_body(body), send)
+                return
+
+        await sse.handle_post_message(scope, replay_receive_from_body(body), send)
 
     # Health check endpoint
     async def health(request):
