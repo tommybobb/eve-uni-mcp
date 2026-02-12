@@ -4,6 +4,8 @@ services:
     image: ghcr.io/tommybobb/eve-uni-mcp:latest
     container_name: eve-wiki-mcp
     restart: unless-stopped
+    env_file:
+      - .env
 
     environment:
       # Transport mode: sse for containerized, stdio for local
@@ -16,9 +18,6 @@ services:
       - RATE_LIMIT_REQUESTS=${RATE_LIMIT_REQUESTS:-60}
       - RATE_LIMIT_WINDOW=${RATE_LIMIT_WINDOW:-60}
       - CORS_ORIGINS=${CORS_ORIGINS:-}
-      - MCP_SSE_DEBUG=${MCP_SSE_DEBUG:-false}
-      - MCP_SSE_DEBUG_BODY_PREVIEW_CHARS=${MCP_SSE_DEBUG_BODY_PREVIEW_CHARS:-220}
-      - MCP_SSE_STATELESS=${MCP_SSE_STATELESS:-true}
 
     ports:
       - "8000:8000"
