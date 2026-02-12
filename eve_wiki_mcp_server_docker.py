@@ -490,6 +490,11 @@ async def run_stdio():
         )
 
 
+async def _noop_asgi_response(scope, receive, send):
+    """No-op ASGI response for SSE endpoints where the response was already sent."""
+    pass
+
+
 async def run_sse():
     """Run with SSE transport (for containerized/remote use)"""
     from mcp.server.sse import SseServerTransport
@@ -564,6 +569,10 @@ async def run_sse():
                 write_stream,
                 app.create_initialization_options()
             )
+        # SSE response was already sent via the raw ASGI send callable.
+        # Return a no-op ASGI response to prevent Starlette from raising
+        # TypeError when it tries to call the return value as a Response.
+        return _noop_asgi_response
 
     # Build middleware stack
     middleware = []
