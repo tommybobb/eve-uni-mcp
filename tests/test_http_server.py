@@ -38,12 +38,12 @@ def test_rate_limit_returns_429(monkeypatch):
     app = server.create_sse_starlette_app()
     client = TestClient(app)
 
-    first = client.get("/messages/")
-    # /messages/ is a POST endpoint; depending on transport validation
-    # behavior it can return 400/404/405 for this GET probe.
-    assert first.status_code in (400, 404, 405)
+    first = client.post("/messages/")
+    # Invalid POST shape is expected here (typically 400) but still consumes
+    # one request in the rate-limit window.
+    assert first.status_code in (400, 422)
 
-    second = client.get("/messages/")
+    second = client.post("/messages/")
     assert second.status_code == 429
     assert second.json()["error"] == "Rate limit exceeded. Please try again later."
 

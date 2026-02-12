@@ -1036,7 +1036,6 @@ def create_sse_starlette_app():
     from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
     from starlette.middleware import Middleware
-    from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.middleware.cors import CORSMiddleware
     from starlette.requests import Request
     from starlette.responses import JSONResponse
@@ -1048,7 +1047,48 @@ def create_sse_starlette_app():
     # Create SSE endpoint handler
     sse = SseServerTransport("/messages/")
 
+    async def authorize_request(request: Request):
+        """Return JSONResponse on auth failure, else None."""
+        if AUTH_TOKEN:
+            # Skip auth for health endpoint
+            if request.url.path == "/health":
+                return None
+
+            auth_header = request.headers.get("Authorization", "")
+            token = auth_header.replace("Bearer ", "").strip()
+
+            if token != AUTH_TOKEN:
+                logger.warning(
+                    "Unauthorized access attempt from %s",
+                    request.client.host if request.client else "unknown"
+                )
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+        return None
+
+    async def enforce_rate_limit(request: Request):
+        """Return JSONResponse on rate-limit failure, else None."""
+        # Skip rate limiting for health endpoint
+        if request.url.path == "/health":
+            return None
+
+        client_id = request.client.host if request.client else "unknown"
+        if not check_rate_limit(client_id):
+            logger.warning("Rate limit exceeded for client: %s", client_id)
+            return JSONResponse(
+                {"error": "Rate limit exceeded. Please try again later."},
+                status_code=429
+            )
+        return None
+
     async def handle_sse(request: Request):
+        auth_error = await authorize_request(request)
+        if auth_error:
+            return auth_error
+
+        rate_error = await enforce_rate_limit(request)
+        if rate_error:
+            return rate_error
+
         async with sse.connect_sse(
             request.scope,
             request.receive,
@@ -1064,6 +1104,19 @@ def create_sse_starlette_app():
         # TypeError when it tries to call the return value as a Response.
         return _noop_asgi_response
 
+    async def handle_messages(request: Request):
+        auth_error = await authorize_request(request)
+        if auth_error:
+            return auth_error
+
+        rate_error = await enforce_rate_limit(request)
+        if rate_error:
+            return rate_error
+
+        await sse.handle_post_message(request.scope, request.receive, request._send)
+        # POST response was already sent by sse.handle_post_message.
+        return _noop_asgi_response
+
     # Health check endpoint
     async def health(request):
         return JSONResponse({
@@ -1072,48 +1125,8 @@ def create_sse_starlette_app():
             "version": "1.2.0"
         })
 
-    # Authentication middleware
-    async def auth_middleware(request: Request, call_next):
-        """Optional token-based authentication."""
-        if AUTH_TOKEN:
-            # Skip auth for health endpoint
-            if request.url.path == "/health":
-                return await call_next(request)
-
-            auth_header = request.headers.get("Authorization", "")
-            token = auth_header.replace("Bearer ", "").strip()
-
-            if token != AUTH_TOKEN:
-                logger.warning(
-                    "Unauthorized access attempt from %s",
-                    request.client.host if request.client else "unknown"
-                )
-                return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
-        return await call_next(request)
-
-    # Rate limiting middleware
-    async def rate_limit_middleware(request: Request, call_next):
-        """Simple rate limiting based on client IP."""
-        # Skip rate limiting for health endpoint
-        if request.url.path == "/health":
-            return await call_next(request)
-
-        client_id = request.client.host if request.client else "unknown"
-        if not check_rate_limit(client_id):
-            logger.warning("Rate limit exceeded for client: %s", client_id)
-            return JSONResponse(
-                {"error": "Rate limit exceeded. Please try again later."},
-                status_code=429
-            )
-
-        return await call_next(request)
-
     # Build middleware stack
-    middleware = [
-        Middleware(BaseHTTPMiddleware, dispatch=auth_middleware),
-        Middleware(BaseHTTPMiddleware, dispatch=rate_limit_middleware),
-    ]
+    middleware = []
 
     if cors_origins:
         middleware.append(
@@ -1129,7 +1142,7 @@ def create_sse_starlette_app():
     return Starlette(
         routes=[
             Route("/sse", endpoint=handle_sse),
-            Mount("/messages/", app=sse.handle_post_message),
+            Route("/messages/", endpoint=handle_messages, methods=["POST"]),
             Route("/health", endpoint=health, methods=["GET"]),
         ],
         middleware=middleware
