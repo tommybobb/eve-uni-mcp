@@ -76,16 +76,19 @@ Add this to your Claude Desktop config file:
 - **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 - **Mac:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 
-**Configuration:**
+**Configuration (using mcp-remote):**
 ```json
 {
   "mcpServers": {
-    "eve-university-wiki": {
-      "url": "http://YOUR_IP:8000/sse"
+    "eve-wiki": {
+      "command": "npx",
+      "args": ["mcp-remote", "http://YOUR_IP:8000/sse", "--allow-http", "--transport", "sse-only"]
     }
   }
 }
 ```
+
+> **Note:** This requires Node.js installed on your system. The `mcp-remote` package bridges Claude Desktop to the remote SSE server.
 
 Replace `YOUR_IP` with:
 - Your Raspberry Pi's IP address (e.g., `192.168.1.100`)
@@ -93,6 +96,12 @@ Replace `YOUR_IP` with:
 - Your server hostname
 
 **Restart Claude Desktop** completely after adding the configuration.
+
+### Recommended System Prompt
+
+To get Claude to **automatically** use the wiki tools when you ask about EVE Online (instead of requiring you to explicitly request it), add this to your Claude Desktop custom instructions under **Settings > Custom Instructions**:
+
+> When I ask about EVE Online — ships, fittings, modules, skills, game mechanics, exploration, PvP, PvE, industry, mining, wormholes, nullsec, sovereignty, fleet operations, or any other in-game topic — always use the EVE University Wiki MCP tools to look up accurate, current information before answering. Search the wiki first, then fetch relevant pages for details. Do not rely solely on training data for EVE-specific information, as game mechanics and ship stats change frequently with patches.
 
 ## Configuration
 
@@ -429,15 +438,6 @@ Improvements welcome! Areas of interest:
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-## Roadmap
-
-- [ ] Built-in caching with Redis
-- [ ] Rate limiting for API calls
-- [ ] Prometheus metrics endpoint
-- [ ] Authentication support
-- [ ] Multiple wiki source support
-- [ ] Ship comparison tool
-- [ ] Fitting analysis tools
 
 ## License
 
