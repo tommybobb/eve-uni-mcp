@@ -39,7 +39,9 @@ def test_rate_limit_returns_429(monkeypatch):
     client = TestClient(app)
 
     first = client.get("/messages/")
-    assert first.status_code in (404, 405)
+    # /messages/ is a POST endpoint; depending on transport validation
+    # behavior it can return 400/404/405 for this GET probe.
+    assert first.status_code in (400, 404, 405)
 
     second = client.get("/messages/")
     assert second.status_code == 429
