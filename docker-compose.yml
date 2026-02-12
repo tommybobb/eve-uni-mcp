@@ -19,6 +19,7 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS:-}
       - MCP_SSE_DEBUG=${MCP_SSE_DEBUG:-false}
       - MCP_SSE_DEBUG_BODY_PREVIEW_CHARS=${MCP_SSE_DEBUG_BODY_PREVIEW_CHARS:-220}
+      - MCP_SSE_STATELESS=${MCP_SSE_STATELESS:-true}
     
     ports:
       - "8000:8000"

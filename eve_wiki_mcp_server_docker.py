@@ -41,6 +41,7 @@ AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN", "")
 MCP_ENFORCE_HTTP_GUARDS = os.getenv("MCP_ENFORCE_HTTP_GUARDS", "false").lower() == "true"
 MCP_SSE_DEBUG = os.getenv("MCP_SSE_DEBUG", "false").lower() == "true"
 MCP_SSE_DEBUG_BODY_PREVIEW_CHARS = int(os.getenv("MCP_SSE_DEBUG_BODY_PREVIEW_CHARS", "220"))
+MCP_SSE_STATELESS = os.getenv("MCP_SSE_STATELESS", "true").lower() == "true"
 
 # Rate limiting configuration
 RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "60"))  # requests per window
@@ -1206,7 +1207,8 @@ def create_sse_starlette_app():
             await app.run(
                 read_stream,
                 write_stream,
-                app.create_initialization_options()
+                app.create_initialization_options(),
+                stateless=MCP_SSE_STATELESS,
             )
         log_sse_debug("SSE session closed for client=%s", client_host)
         # SSE response was already sent via the raw ASGI send callable.
@@ -1240,7 +1242,7 @@ def create_sse_starlette_app():
             len(body),
         )
 
-        if session_id:
+        if session_id and not MCP_SSE_STATELESS:
             session_lock = get_session_lock(session_id)
             async with session_lock:
                 session_state = session_init_state.setdefault(
@@ -1296,6 +1298,13 @@ def create_sse_starlette_app():
                 await sse.handle_post_message(scope, replay_receive_from_body(body), send)
                 return
 
+        if session_id and MCP_SSE_STATELESS and methods:
+            log_sse_debug(
+                "Stateless mode active; bypassing pre-init gate session=%s methods=%s",
+                _short_session_id(session_id),
+                methods,
+            )
+
         log_sse_debug("Forwarding request without session_id to MCP transport")
         await sse.handle_post_message(scope, replay_receive_from_body(body), send)
 
@@ -1350,6 +1359,7 @@ async def run_sse():
         logger.warning("⚠️  Authentication disabled - server is open to all clients")
     
     logger.info("⏱️  Rate limit: %d requests per %d seconds", RATE_LIMIT_REQUESTS, RATE_LIMIT_WINDOW)
+    logger.info("SSE stateless mode: %s", "enabled" if MCP_SSE_STATELESS else "disabled")
 
     config = uvicorn.Config(
         starlette_app,

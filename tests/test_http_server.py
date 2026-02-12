@@ -64,7 +64,8 @@ def test_health_endpoint_bypasses_rate_limit(monkeypatch):
     assert response.status_code == 200
 
 
-def test_messages_rejects_non_initialize_before_session_init():
+def test_messages_rejects_non_initialize_before_session_init_in_strict_mode(monkeypatch):
+    monkeypatch.setattr(server, "MCP_SSE_STATELESS", False)
     app = server.create_sse_starlette_app()
     client = TestClient(app)
 
@@ -80,6 +81,24 @@ def test_messages_rejects_non_initialize_before_session_init():
 
     assert response.status_code == 409
     assert "not initialized" in response.json()["error"]
+
+
+def test_messages_allows_non_initialize_before_session_init_in_stateless_mode(monkeypatch):
+    monkeypatch.setattr(server, "MCP_SSE_STATELESS", True)
+    app = server.create_sse_starlette_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/messages/?session_id=test-session",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/list",
+            "params": {},
+        },
+    )
+
+    assert response.status_code != 409
 
 
 def test_messages_allows_initialize_request_before_session_init():
