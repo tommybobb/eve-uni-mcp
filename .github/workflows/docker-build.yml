@@ -109,6 +109,20 @@ jobs:
       - name: Stop existing container
         run: docker compose -f docker-compose.ghcr.yml down || true
 
+      - name: Prepare .env for compose
+        env:
+          MCP_SSE_DEBUG: ${{ vars.MCP_SSE_DEBUG }}
+          MCP_SSE_DEBUG_BODY_PREVIEW_CHARS: ${{ vars.MCP_SSE_DEBUG_BODY_PREVIEW_CHARS }}
+          MCP_SSE_STATELESS: ${{ vars.MCP_SSE_STATELESS }}
+        run: |
+          cp -f .env.example .env
+          [ -n "$MCP_SSE_DEBUG" ] || MCP_SSE_DEBUG=true
+          [ -n "$MCP_SSE_DEBUG_BODY_PREVIEW_CHARS" ] || MCP_SSE_DEBUG_BODY_PREVIEW_CHARS=220
+          [ -n "$MCP_SSE_STATELESS" ] || MCP_SSE_STATELESS=true
+          sed -i "s/^MCP_SSE_DEBUG=.*/MCP_SSE_DEBUG=$MCP_SSE_DEBUG/" .env
+          sed -i "s/^MCP_SSE_DEBUG_BODY_PREVIEW_CHARS=.*/MCP_SSE_DEBUG_BODY_PREVIEW_CHARS=$MCP_SSE_DEBUG_BODY_PREVIEW_CHARS/" .env
+          sed -i "s/^MCP_SSE_STATELESS=.*/MCP_SSE_STATELESS=$MCP_SSE_STATELESS/" .env
+
       - name: Start updated container
         run: docker compose -f docker-compose.ghcr.yml up -d
 
